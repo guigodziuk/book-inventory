@@ -51,8 +51,32 @@ Function InsertRow {
     if (!$finalRange) {
         $finalRange = $initialRange
     }
-    $rangeToInsert = $excelFile.Range(("A{0}" -f $initialRange),("F{0}" -f $finalRange))
-    $rangeToInsert.Insert([System.Type]::Missing)
+    $deltaRange = $finalRange - $initialRange
+    if ($deltaRange -ge 4) {
+        $iRange = $initialRange
+        $fRange = $initialRange + 4
+        while ($deltaRange -ge 4) {
+            $rangeToInsert = $excelFile.Range(("A{0}" -f $iRange),("F{0}" -f $fRange))
+            $rangeToInsert.Select()
+            $rangeToInsert.Insert([System.Type]::Missing)
+            $deltaRange = $deltaRange - 5
+            $iRange = $fRange + 1
+            $fRange = $iRange + 4
+        }
+        if ($deltaRange -ge 0) {
+            $fRange = $iRange + $deltaRange
+            $iDeltaRange = $iRange - 1
+            $fDeltaRange = $frange - 1
+            $rangeToInsert = $excelFile.Range(("A{0}" -f $iDeltaRange),("F{0}" -f $fDeltaRange))
+            $rangeToInsert.Select()
+            $rangeToInsert.Insert([System.Type]::Missing)
+        }
+    }
+    else {
+        $rangeToInsert = $excelFile.Range(("A{0}" -f $initialRange),("F{0}" -f $finalRange))
+        $rangeToInsert.Select()
+        $rangeToInsert.Insert([System.Type]::Missing)
+    }
 }
 Function RemoveRow {
     param(
@@ -62,9 +86,28 @@ Function RemoveRow {
     if (!$finalRange) {
         $finalRange = $initialRange
     }
-    $range0 = $excelFile.Range(("A{0}" -f $initialRange),("F{0}" -f $finalRange))
-    $range0.Select()
-    $range0.Delete([System.Type]::Missing)
+    $deltaRange = $finalRange - $initialRange
+    if ($deltaRange -ge 4) {
+        $iRange = $initialRange
+        $fRange = $initialRange + 4
+        while ($deltaRange -ge 4) {
+            $rangeToDelete = $excelFile.Range(("A{0}" -f $iRange),("F{0}" -f $fRange))
+            $rangeToDelete.Select()
+            $rangeToDelete.Delete([System.Type]::Missing)
+            $deltaRange = $deltaRange - 5
+        }
+        if ($deltaRange -ge 0) {
+            $fRange = $iRange + $deltaRange
+            $rangeToDelete = $excelFile.Range(("A{0}" -f $iRange),("F{0}" -f $fRange))
+            $rangeToDelete.Select()
+            $rangeToDelete.Delete([System.Type]::Missing)
+        }
+    }
+    else {
+        $rangeToDelete = $excelFile.Range(("A{0}" -f $initialRange),("F{0}" -f $finalRange))
+        $rangeToDelete.Select()
+        $rangeToDelete.Delete([System.Type]::Missing)
+    }
 }
 Function RegisterFolder {
     param(
@@ -191,7 +234,7 @@ if (!$excel) {
     $excel = New-Object -ComObject Excel.Application
 }
 $initialCheckLine = 3   
-$directoryPath = "D:\HQ\DC Comics\001\00003 DEV"
+$directoryPath = "D:\HQ\DC Comics\001\00003"
 $excel.Visible = $true                                    
 $book = $excel.Workbooks.Open("C:\Users\Guilherme\OneDrive\Documents\Projetos\Pessoal\Automatizador de Quadrinhos\DC Comics.xlsx")
 $excelFile = $book.Sheets(4)
@@ -201,6 +244,26 @@ Header
 #RemoveFolder
 $excelRow = $initialCheckLine
 foreach($folder in $FolderList) {
+    $nextNav = $excelFile.Cells.Item($excelRow,1).Value2
+    $registeredComics = CountRegisteredArc -line $excelRow -testNav $nextNav
+    $directoryNextNav = Join-Path -Path $directoryPath -ChildPath $nextNav
+    $testPath = Test-Path -Path $directoryNextNav -PathType Container
+    $countComics = $registeredComics.count
+    if (!$testPath) {
+    #if the registered folder doesn't exist
+        while (!$testPath) {
+            Write-Host "$nextNav doesn't exist..." -BackgroundColor DarkRed
+            $y = $excelRow + $countComics - 1
+            RemoveRow -initialRange $excelRow -finalRange $y
+            $lineComicsRegistered = $lineComicsRegistered - $countComics
+            Write-Host "$nextNav deleted." -BackgroundColor DarkRed
+            $nextNav = $excelFile.Cells.Item($excelRow,1).Value2
+            $directoryNextNav = Join-Path -Path $directoryPath -ChildPath $nextNav
+            $testPath = Test-Path -Path $directoryNextNav -PathType Container
+            $registeredComics = CountRegisteredArc -line $excelRow -testNav $nextNav
+            $countComics = $registeredComics.count
+        }
+    }
     $ComicsContent=@()
     $nav=$folder.Name
     $testNav = $excelFile.Cells.Item($excelRow,1).Value2
@@ -214,21 +277,6 @@ foreach($folder in $FolderList) {
     $initialRange = $excelRow
     $regComics = $excelRow
     $trigger = 0
-    $testPath = Test-Path -Path $directoryChildPathTest -PathType Container
-    $countComics = $registeredComics.count
-    if (!$testPath) {
-    #if the registered folder doesn't exist
-        while (!$testPath) {
-            Write-Host "$testNav doesn't exist..." -BackgroundColor DarkRed
-            $y = $excelRow + $countComics - 1
-            RemoveRow -initialRange $excelRow -finalRange $y
-            $lineComicsRegistered = $lineComicsRegistered - $countComics
-            Write-Host "$testNav deleted." -BackgroundColor DarkRed
-            $nextNav = $excelFile.Cells.Item($excelRow,1).Value2
-            $directoryNextNav = Join-Path -Path $directoryPath -ChildPath $nextNav
-            $testPath = Test-Path -Path $directoryNextNav -PathType Container
-        }
-    }
     Write-Host "$testNav exists." -BackgroundColor DarkYellow -ForegroundColor White                               
     $excelRow = $excelRow + $countCoomicsToJump
     if ($excelFile.Cells.Item($excelRow,1).Value2 -eq $folder.Name) {
@@ -258,49 +306,53 @@ foreach($folder in $FolderList) {
                 }
             }
         }
-        else {
-            foreach ($book in $registeredComics) {
-                $comictoremove = $excelFile.Cells.Item($regComics,2).Value2
-                if ($comictoremove -notin $ComicsContent.name) {
-                    if ($book -eq $comictoremove) {
-                        RemoveRow -initialRange $regComics
-                        $regComics--
-                        $trigger++
-                    }
+    else {
+        $registeredComicsCount = $registeredComics.count
+        foreach ($book in $registeredComics) {
+            $comictoremove = $excelFile.Cells.Item($regComics,2).Value2
+            if ($comictoremove -notin $ComicsContent.name) {
+                if ($book -eq $comictoremove) {
+                    RemoveRow -initialRange $regComics
+                    $regComics--
+                    $trigger++
+                    $registeredComicsCount--
                 }
-                $regComics++
             }
+            $regComics++
         }
-        if ($trigger -gt 0) {
-            $finalRange = $regComics-1
-            RegisterFolder -row $initialRange -folder $folder.Name
-            ExplodeRange -initialRange $initialRange -finalRange $finalRange
-            TableStyle -initialRange $initialRange -finalRange $finalRange
+    }
+    if (($trigger -gt 0) -and ($registeredComicsCount -gt 0)) {
+        $finalRange = $regComics-1
+        RegisterFolder -row $initialRange -folder $folder.Name
+        ExplodeRange -initialRange $initialRange -finalRange $finalRange
+        TableStyle -initialRange $initialRange -finalRange $finalRange
+    }
+    #verifying comics to add
+    foreach($subfolder in $ComicsContent) {
+        $comic=$subfolder.Name
+        $linecomictoremove = $excelRow
+        $comictoremove = $excelFile.Cells.Item($linecomictoremove,2).Value2
+        if ($excelFile.Cells.Item($excelRow,2).Value2 -eq $subfolder.Name) {
+        #if the comic is registered
+            Write-Host "$comic already registered." -BackgroundColor DarkYellow -ForegroundColor Black
+            $excelRow++
         }
-        #verifying comics to add
-        foreach($subfolder in $ComicsContent) {
-            $comic=$subfolder.Name
-            $linecomictoremove = $excelRow
-            $comictoremove = $excelFile.Cells.Item($linecomictoremove,2).Value2
-            if ($excelFile.Cells.Item($excelRow,2).Value2 -eq $subfolder.Name) {
-            #if the comic is registered
-                Write-Host "$comic already registered." -BackgroundColor DarkYellow -ForegroundColor Black
-                $excelRow++
-            }
-            else {
-            #if the comic is not registered
-                $trigger++
-                Write-Host "Registering $comic" -BackgroundColor DarkGreen
-                InsertRow -initialRange $excelRow
-                RegisterComic -row $excelRow -subfolder $subfolder.Name
-                $excelRow++
-            }
+        else {
+        #if the comic is not registered
+            $trigger++
+            Write-Host "Registering $comic" -BackgroundColor DarkGreen
+            InsertRow -initialRange $excelRow
+            RegisterComic -row $excelRow -subfolder $subfolder.Name
+            $excelRow++
         }
-        if ($trigger -gt 0) {
-            $finalRange = $excelRow-1
-            ExplodeRange -initialRange $initialRange -finalRange $finalRange
-            TableStyle -initialRange $initialRange -finalRange $finalRange
-        }
+    }
+    if ($trigger -gt 0) {
+        $finalRange = $excelRow-1
+        RegisterFolder -row $initialRange -folder $folder.Name
+        RegisterFolder  -row $excelRow -folder $folder.Name
+        ExplodeRange -initialRange $initialRange -finalRange $finalRange
+        TableStyle -initialRange $initialRange -finalRange $finalRange
+    }
     }
     else {
     #if the folder is not registered
@@ -320,6 +372,21 @@ foreach($folder in $FolderList) {
         TableStyle -initialRange $initialRange -finalRange $finalRange
     }
 }
-
+$lastTest = $excelFile.Cells.Item($excelRow,1).Value2
+if ($lastTest) {
+    $registeredComics = CountRegisteredArc -line $excelRow -testNav $lastTest
+    $countComics = $registeredComics.count
+    while ($lastTest) {
+        Write-Host "$lastTest doesn't exist..." -BackgroundColor DarkRed
+        $y = $excelRow + $countComics - 1
+        RemoveRow -initialRange $excelRow -finalRange $y
+        $lineComicsRegistered = $lineComicsRegistered - $countComics
+        Write-Host "$lastTest deleted." -BackgroundColor DarkRed
+        $lastTest = $excelFile.Cells.Item($excelRow,1).Value2
+        $registeredComics = CountRegisteredArc -line $excelRow -testNav $lastTest
+        $countComics = $registeredComics.count
+    }
+}
+Clear-Host
 Write-Host "****Comic Register Automator work is finished!****" -ForegroundColor White -BackgroundColor Blue
 #DCLogo
